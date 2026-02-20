@@ -42,6 +42,7 @@ npm run dev
 ```
 
 Frontend sends PDF uploads to:
-- `VITE_API_BASE_URL/api/analyze-pdf`
+- `VITE_API_BASE_URL/api/initial-feedback` (student + instructor PDFs)
+- `VITE_API_BASE_URL/api/practice-feedback` (student practice PDF + generated question context)
 
 Default base URL is `http://localhost:8000`.
