@@ -3,21 +3,18 @@
 }
 
 .homework-app {
-  --ink: #17333d;
-  --accent: #ff7a35;
-  --accent-strong: #e85f17;
-  --paper: #fff8ef;
+  --ink: var(--theme-text);
+  --accent: var(--theme-text);
+  --accent-strong: var(--theme-secondary);
+  --paper: #fffcf8;
   --panel: #fffdf9;
-  --line: #eadfcb;
+  --line: var(--theme-ternary);
   --ok: #1b6f42;
-  --warn: #9d4a15;
+  --warn: var(--theme-error);
 
   min-height: 100vh;
   padding: clamp(1rem, 2vw, 2rem);
-  background:
-    radial-gradient(circle at 8% 10%, #ffe1bf 0%, transparent 35%),
-    radial-gradient(circle at 90% 85%, #ffd2b7 0%, transparent 40%),
-    linear-gradient(145deg, #f9f2e4, #f4e6d2 50%, #f9efe0);
+  background-color: var(--app-bg);
   color: var(--ink);
 }
 
@@ -39,7 +36,7 @@
 }
 
 .upload-page {
-  width: min(720px, 100%);
+  width: min(1000px, 100%);
 }
 
 .solution-page {
@@ -69,7 +66,7 @@
 }
 
 .swap-file-button {
-  border: 1px solid #d7bc96;
+  border: 1px solid #A6A6A8;
   border-radius: 10px;
   padding: 0.5rem 0.8rem;
   background: #fff5e9;
@@ -87,7 +84,6 @@
   font-size: 0.75rem;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #93551a;
 }
 
 .upload-page h1 {
@@ -102,7 +98,7 @@
 }
 
 .file-picker {
-  border: 2px dashed #d8bf98;
+  border: 2px dashed #272635;
   border-radius: 14px;
   display: block;
   padding: 1rem;
@@ -122,7 +118,7 @@
 }
 
 .file-picker-subtitle {
-  color: #6f604e;
+  color: #272635;
   font-size: 0.9rem;
 }
 
@@ -153,7 +149,7 @@
 
 .primary-button {
   color: #fff;
-  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  background: #17333d;
 }
 
 .secondary-button {
@@ -182,7 +178,7 @@
 .score-banner {
   padding: 0.8rem;
   border-radius: 12px;
-  background: #17333d;
+  background: var(--theme-text);
   color: #f8f4e8;
 }
 
@@ -256,7 +252,7 @@
 
 .next-problem {
   margin-top: 1rem;
-  border: 1px solid #d7bc96;
+  border: 1px solid #A6A6A8;
   border-radius: 12px;
   padding: 0.85rem;
   background: #fff6ea;

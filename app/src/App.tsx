@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import './App.css'
+import { useTheme } from './context/themeContext'
 
 type StepFeedback = {
   id: string
@@ -177,6 +178,7 @@ const getPracticeProblem = (seedIndex: number, offset: number): PracticeProblem 
 }
 
 function App() {
+  const { theme } = useTheme()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [feedback, setFeedback] = useState<MathFeedback | null>(null)
@@ -193,6 +195,19 @@ function App() {
     const kb = selectedFile.size / 1024
     return kb > 1024 ? `${(kb / 1024).toFixed(2)} MB` : `${kb.toFixed(1)} KB`
   }, [selectedFile])
+
+  const appStyle = useMemo(
+    () =>
+      ({
+        '--app-bg': theme.colors.background,
+        '--theme-text': theme.colors.text,
+        '--theme-primary': theme.colors.primary,
+        '--theme-secondary': theme.colors.secondary,
+        '--theme-ternary': theme.colors.ternary,
+        '--theme-error': theme.colors.error,
+      }) as CSSProperties,
+    [theme],
+  )
 
   const resetFeedbackFlow = () => {
     setFeedback(null)
@@ -249,7 +264,7 @@ function App() {
 
   if (!selectedFile) {
     return (
-      <main className="homework-app upload-mode">
+      <main className="homework-app upload-mode" style={appStyle}>
         <section className="panel upload-page" aria-label="Homework PDF upload">
           <p className="eyebrow">Math Feedback Assistant</p>
           <h1>Upload your solution PDF</h1>
@@ -269,7 +284,7 @@ function App() {
   }
 
   return (
-    <main className="homework-app solution-mode">
+    <main className="homework-app solution-mode" style={appStyle}>
       <section className="panel solution-page" aria-label="Generated math feedback">
         <header className="solution-head">
           <div>
