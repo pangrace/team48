@@ -25,95 +25,6 @@ type PracticeProblem = {
   tip: string
 }
 
-type FeedbackSeed = {
-  problemTitle: string
-  problemPrompt: string
-  score: number
-  totalPoints: number
-  steps: Omit<StepFeedback, 'id'>[]
-}
-
-const feedbackSeeds: FeedbackSeed[] = [
-  {
-    problemTitle: 'Solve for x',
-    problemPrompt: '2(x - 3) + 5 = 3x - 1',
-    score: 7,
-    totalPoints: 10,
-    steps: [
-      {
-        studentStep: '2x - 6 + 5 = 3x - 1',
-        status: 'correct',
-        whatWentWrong: 'No issue here. You distributed 2 correctly.',
-        howToFix: 'Keep this structure and continue combining constants.',
-      },
-      {
-        studentStep: '2x - 1 = 3x + 1',
-        status: 'incorrect',
-        whatWentWrong: 'The right side changed from -1 to +1 with no valid operation.',
-        howToFix: 'Keep the equation as 2x - 1 = 3x - 1 before moving terms.',
-      },
-      {
-        studentStep: '-x = 2, so x = -2',
-        status: 'incorrect',
-        whatWentWrong: 'This result came from the earlier sign error and no variable cancellation check.',
-        howToFix: 'From 2x - 1 = 3x - 1, subtract 2x to get -1 = x - 1, then add 1: x = 0.',
-      },
-    ],
-  },
-  {
-    problemTitle: 'Factor the quadratic',
-    problemPrompt: 'x^2 + 7x + 12 = 0',
-    score: 8,
-    totalPoints: 10,
-    steps: [
-      {
-        studentStep: '(x + 3)(x + 4) = 0',
-        status: 'correct',
-        whatWentWrong: 'No issue here. The factors are correct.',
-        howToFix: 'Good factoring pattern. Continue using zero-product property.',
-      },
-      {
-        studentStep: 'x + 3 = 3, x + 4 = 4',
-        status: 'incorrect',
-        whatWentWrong: 'You set each factor equal to its constant instead of zero.',
-        howToFix: 'Set each factor to zero: x + 3 = 0 and x + 4 = 0.',
-      },
-      {
-        studentStep: 'x = 0 and x = 0',
-        status: 'incorrect',
-        whatWentWrong: 'Both solutions collapsed because of the incorrect equation setup.',
-        howToFix: 'Solve correctly to get x = -3 and x = -4.',
-      },
-    ],
-  },
-  {
-    problemTitle: 'System of equations',
-    problemPrompt: 'y = 2x + 1 and y = x + 4',
-    score: 9,
-    totalPoints: 10,
-    steps: [
-      {
-        studentStep: '2x + 1 = x + 4',
-        status: 'correct',
-        whatWentWrong: 'No issue. Substitution setup is right.',
-        howToFix: 'Great start. Now isolate x carefully.',
-      },
-      {
-        studentStep: 'x + 1 = 4, so x = 3',
-        status: 'correct',
-        whatWentWrong: 'No issue. Rearranging was accurate.',
-        howToFix: 'Now substitute x = 3 back into either equation.',
-      },
-      {
-        studentStep: 'y = 2(3) + 1 = 8',
-        status: 'incorrect',
-        whatWentWrong: 'Arithmetic slip: 2(3) + 1 equals 7, not 8.',
-        howToFix: 'Use y = 7. Final solution pair is (3, 7).',
-      },
-    ],
-  },
-]
-
 const practiceProblems: PracticeProblem[] = [
   {
     title: 'Practice Problem 1',
@@ -137,57 +48,87 @@ const practiceProblems: PracticeProblem[] = [
   },
 ]
 
-const toTitleCase = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1).toLowerCase()
-
-const inferStudentName = (fileName: string): string => {
-  const withoutExtension = fileName.replace(/\.pdf$/i, '')
-  const firstToken = withoutExtension.split(/[^a-zA-Z]/).find((part) => part.length > 1)
-  return firstToken ? toTitleCase(firstToken) : 'Student'
-}
-
 const hashText = (text: string): number =>
   text
     .toLowerCase()
     .split('')
     .reduce((acc, char) => acc + char.charCodeAt(0), 0)
 
-const getMockMathFeedback = (fileName: string): { feedback: MathFeedback; seedIndex: number } => {
-  const seedIndex = hashText(fileName) % feedbackSeeds.length
-  const seed = feedbackSeeds[seedIndex]
-  const studentName = inferStudentName(fileName)
-
-  return {
-    seedIndex,
-    feedback: {
-      problemTitle: seed.problemTitle,
-      problemPrompt: seed.problemPrompt,
-      score: seed.score,
-      totalPoints: seed.totalPoints,
-      personalizedSummary: `${studentName}, your setup shows good intuition. The main point to improve is checking signs and arithmetic at each transition before writing your final answer.`,
-      steps: seed.steps.map((step, index) => ({
-        ...step,
-        id: `${seed.problemTitle}-${index}`,
-      })),
-    },
-  }
-}
-
 const getPracticeProblem = (seedIndex: number, offset: number): PracticeProblem => {
   const problemIndex = (seedIndex + offset) % practiceProblems.length
   return practiceProblems[problemIndex]
+}
+
+type AnalyzeResponse = {
+  feedback: {
+    problemTitle: string
+    problemPrompt: string
+    personalizedSummary: string
+    score: number
+    totalPoints: number
+    steps: Array<{
+      id?: string
+      studentStep: string
+      status: 'correct' | 'incorrect'
+      whatWentWrong: string
+      howToFix: string
+    }>
+  }
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+
+const getErrorMessage = async (response: Response): Promise<string> => {
+  try {
+    const payload = (await response.json()) as { detail?: string }
+    return payload.detail ?? `Request failed with status ${response.status}`
+  } catch {
+    return `Request failed with status ${response.status}`
+  }
+}
+
+const analyzePdf = async (file: File): Promise<MathFeedback> => {
+  const formData = new FormData()
+  formData.append('pdf', file)
+
+  const response = await fetch(`${API_BASE_URL}/api/analyze-pdf`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const payload = (await response.json()) as AnalyzeResponse
+  const feedback = payload.feedback
+
+  return {
+    problemTitle: feedback.problemTitle,
+    problemPrompt: feedback.problemPrompt,
+    personalizedSummary: feedback.personalizedSummary,
+    score: feedback.score,
+    totalPoints: feedback.totalPoints,
+    steps: feedback.steps.map((step, index) => ({
+      id: step.id ?? `step-${index + 1}`,
+      studentStep: step.studentStep,
+      status: step.status,
+      whatWentWrong: step.whatWentWrong,
+      howToFix: step.howToFix,
+    })),
+  }
 }
 
 function App() {
   const { theme } = useTheme()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<MathFeedback | null>(null)
   const [feedbackSeedIndex, setFeedbackSeedIndex] = useState(0)
   const [hasConfirmedFeedback, setHasConfirmedFeedback] = useState(false)
   const [practiceOffset, setPracticeOffset] = useState(1)
   const [practiceProblem, setPracticeProblem] = useState<PracticeProblem | null>(null)
-  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const fileSizeLabel = useMemo(() => {
     if (!selectedFile) {
@@ -216,50 +157,28 @@ function App() {
     setHasConfirmedFeedback(false)
     setPracticeOffset(1)
     setPracticeProblem(null)
+    setErrorMessage(null)
   }
 
   const processUploadedFile = async (file: File) => {
     setSelectedFile(file)
     resetFeedbackFlow()
     setIsGenerating(true)
-    setUploadError(null)
-
-    const formData = new FormData()
-    formData.append('pdf', file)
+    setFeedbackSeedIndex(hashText(file.name))
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/analyze-pdf`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      const body = await response.json().catch(() => null)
-      if (!response.ok) {
-        const errorDetail =
-          body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string'
-            ? body.detail
-            : 'Failed to analyze PDF.'
-        throw new Error(errorDetail)
-      }
-
-      if (!body || typeof body !== 'object' || !('feedback' in body)) {
-        throw new Error('Backend response was missing feedback data.')
-      }
-
-      const fallbackSeed = getMockMathFeedback(file.name)
-      setFeedback(body.feedback as MathFeedback)
-      setFeedbackSeedIndex(fallbackSeed.seedIndex)
+      const responseFeedback = await analyzePdf(file)
+      setFeedback(responseFeedback)
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Unexpected error while analyzing PDF.')
-      setFeedback(null)
+      const message = error instanceof Error ? error.message : 'Failed to analyze PDF.'
+      setErrorMessage(message)
     } finally {
       setIsGenerating(false)
     }
   }
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    const input = event.target
 
     if (!file) {
       return
@@ -267,12 +186,12 @@ function App() {
 
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       alert('Please upload a PDF file.')
-      input.value = ''
+      event.target.value = ''
       return
     }
 
-    await processUploadedFile(file)
-    input.value = ''
+    void processUploadedFile(file)
+    event.target.value = ''
   }
 
   const handleConfirmRead = () => {
@@ -299,7 +218,7 @@ function App() {
           <h1>Upload your solution PDF</h1>
           <p className="intro">
             Start here by uploading a math homework PDF. After upload, the full screen switches to personalized
-            step-by-step solution feedback.
+            step-by-step solution feedback from the agent.
           </p>
 
           <label htmlFor="pdf-upload" className="file-picker">
@@ -333,9 +252,13 @@ function App() {
           </label>
         </header>
 
-        {isGenerating ? (
-          <p className="loading-text">Analyzing your solution steps...</p>
-        ) : feedback ? (
+        {isGenerating ? <p className="loading-text">Analyzing your solution steps with the agent...</p> : null}
+
+        {!isGenerating && errorMessage ? (
+          <p className="error-text">{errorMessage}</p>
+        ) : null}
+
+        {!isGenerating && !errorMessage && feedback ? (
           <div className="feedback-content">
             <div className="score-banner">
               <p>
@@ -391,11 +314,7 @@ function App() {
               </div>
             ) : null}
           </div>
-        ) : uploadError ? (
-          <p className="loading-text">{uploadError}</p>
-        ) : (
-          <p className="loading-text">Upload a PDF to generate feedback.</p>
-        )}
+        ) : null}
       </section>
     </main>
   )
