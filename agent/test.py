@@ -9,6 +9,8 @@ from langgraph.graph import StateGraph, START, END
 import json
 from typing import Any, Dict
 
+from functools import partial
+
 # ----------------------------
 # 1) OCI Agent Runtime wrapper
 # ----------------------------
@@ -61,21 +63,20 @@ def get_instructor_solution_text():
 class AgentState(TypedDict):
     student_solutions: List[str]
     instructor_solutions: List[str]
-    current_problem_on: 0
-    problem_threshold: 3
-    next_problem: None
+    current_problem_on: int
+    problem_threshold: int
+    next_problem: Optional[str]
 
 def start(state: AgentState, llm: OCIAgentLLM) -> AgentState:
     student_solution_text = get_student_solution_text()
     instructor_solution_text = get_instructor_solution_text()
     # populate state
-    state.student_solutions.append(student_solution_text)
-    state.instructor_solutions.append(instructor_solution_text)
-    current_problem_on = 0
+    state["student_solutions"].append(student_solution_text)
+    state["instructor_solutions"].append(instructor_solution_text)
 
 def parse_student_solutions(state: AgentState, llm: OCIAgentLLM) -> AgentState:
-    if state.current_problem_on > 0:
-        state.student_solutions.append("2+3 = 9")
+    if state["current_problem_on"] > 0:
+        state["student_solutions"].append("2+3 = 9")
         # need to add student input here
 
 
@@ -84,10 +85,10 @@ def verify_solution(state: AgentState, llm: OCIAgentLLM) -> AgentState:
     You are grading a student's solution.
 
     Instructor Solution:
-    {state.instructor_solutions[state.current_problem_on]}
+    {state["instructor_solutions"][state["current_problem_on"]]}
 
     Student Solution:
-    {state.student_solutions[state.current_problem_on]}
+    {state["student_solutions"][state["current_problem_on"]]}
 
     Respond with EXACTLY one word:
     CORRECT
@@ -103,7 +104,7 @@ def verify_solution(state: AgentState, llm: OCIAgentLLM) -> AgentState:
 
 
 def check_threshold(state: AgentState) -> str:
-    if state.current_problem_on > state.problem_threshold:
+    if state["current_problem_on"] > state["problem_threshold"]:
         return "END"
     return "CONTINUE"
 
@@ -112,10 +113,10 @@ def generate_example(state: AgentState, llm: OCIAgentLLM) -> AgentState:
 You are a tutor.
 
 Instructor Solution (reference):
-{state.instructor_solutions[state.current_problem_on]}
+{state["instructor_solutions"][state["current_problem_on"]]}
 
 Student Incorrect Solution:
-{state.student_solutions[state.current_problem_on]}
+{state["student_solutions"][state["current_problem_on"]]}
 
 Create ONE practice problem that targets the student's exact mistake.
 
@@ -139,10 +140,10 @@ Return JSON ONLY (no markdown, no backticks) in this exact format:
             "solution": raw,
             "common_pitfall": "Model did not return valid JSON."
         }
-    state.next_problem = item.get("question", "")
+    state["next_problem"] = item.get("question", "")
     # make post request to student
-    state.instructor_solutions.append(item.get("solution", ""))
-    state.current_problem_on += 1
+    state["instructor_solutions"].append(item.get("solution", ""))
+    state["current_problem_on"] += 1
     return state
 
 def generate_explanation(state: AgentState, llm: OCIAgentLLM) -> AgentState:
@@ -158,20 +159,20 @@ def build_graph(llm: OCIAgentLLM):
     g = StateGraph(AgentState)
 
     # Nodes
-    g.add_node("start")
+    g.add_node("start", partial(start, llm=llm))
     # parse student solution
-    g.add_node("parse_student_solutions")
+    g.add_node("parse_student_solutions", partial(parse_student_solutions, llm=llm))
     # generate explanation
-    g.add_node("generate_explanation")
+    g.add_node("generate_explanation", partial(generate_explanation, llm=llm))
     # generate example questions
-    g.add_node("generate_example")
+    g.add_node("generate_example", partial(generate_example, llm=llm))
 
     # Edges
     g.add_edge(START, "start")
     g.add_edge("start", "parse_student_solutions")
-    g.add_conditional_edges("parse_student_solutions", verify_solution, {"incorrect": "generate_explanation", "correct": END})
+    g.add_conditional_edges("parse_student_solutions", partial(verify_solution, llm=llm), {"incorrect": "generate_explanation", "correct": END})
     g.add_conditional_edges("generate_explanation", check_threshold, {"CONTINUE": "generate_example", "END": END})
-    g.add_edge("generate_example", "parse_student_solution")
+    g.add_edge("generate_example", "parse_student_solutions")
     return g.compile()
 
 
@@ -193,16 +194,17 @@ def main():
     app = build_graph(llm)
 
     state: AgentState = {
-        "user_input": "Compute (12 + 8) * 3 using tools.",
-        "scratchpad": [],
-        "tool_name": None,
-        "tool_args": None,
-        "tool_result": None,
-        "final": None,
+        "student_solutions": [],
+        "instructor_solutions": [],
+        "current_problem_on": 0,
+        "problem_threshold": 3,
+        "next_problem": None
     }
 
     out = app.invoke(state)
-    print("\nFINAL:\n", out["final"])
+    print("\nFINAL STATE:\n", out)
+    print("\nNEXT PROBLEM:\n", out.get("next_problem"))
+    print("\nCURRENT PROBLEM INDEX:\n", out.get("current_problem_on"))
 
 if __name__ == "__main__":
     main()
