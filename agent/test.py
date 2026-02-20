@@ -47,6 +47,12 @@ class OCIAgentLLM:
 
         # resp can be a structured object; stringify for now
         return str(resp)
+### helpers - get from prabhleen
+def get_student_solution_text():
+    return "1+1 = 3"
+
+def get_instructor_solution_text():
+    return "1+1 = 2"
 
 # ----------------------------
 # 3) Agentic flow (ReAct-ish)
@@ -57,14 +63,20 @@ class AgentState(TypedDict):
     instructor_solutions: List[str]
     current_problem_on: 0
     problem_threshold: 3
-    next_question: None
-    next_solution: None
+    next_problem: None
+
+def start(state: AgentState, llm: OCIAgentLLM) -> AgentState:
+    student_solution_text = get_student_solution_text()
+    instructor_solution_text = get_instructor_solution_text()
+    # populate state
+    state.student_solutions.append(student_solution_text)
+    state.instructor_solutions.append(instructor_solution_text)
+    current_problem_on = 0
 
 def parse_student_solutions(state: AgentState, llm: OCIAgentLLM) -> AgentState:
-    state.student_solutions.append("2+3 = 9")
-
-def parse_solutions(state: AgentState, llm: OCIAgentLLM) -> AgentState:
-    state.instructor_solutions.append("2+3 = 5")
+    if state.current_problem_on > 0:
+        state.student_solutions.append("2+3 = 9")
+        # need to add student input here
 
 
 def verify_solution(state: AgentState, llm: OCIAgentLLM) -> AgentState:
@@ -72,10 +84,10 @@ def verify_solution(state: AgentState, llm: OCIAgentLLM) -> AgentState:
     You are grading a student's solution.
 
     Instructor Solution:
-    {state.instructor_solutions[0]}
+    {state.instructor_solutions[state.current_problem_on]}
 
     Student Solution:
-    {state.student_solutions[0]}
+    {state.student_solutions[state.current_problem_on]}
 
     Respond with EXACTLY one word:
     CORRECT
@@ -90,7 +102,7 @@ def verify_solution(state: AgentState, llm: OCIAgentLLM) -> AgentState:
         return "incorrect"
 
 
-def should_continue(state: AgentState) -> str:
+def check_threshold(state: AgentState) -> str:
     if state.current_problem_on > state.problem_threshold:
         return "END"
     return "CONTINUE"
@@ -100,10 +112,10 @@ def generate_example(state: AgentState, llm: OCIAgentLLM) -> AgentState:
 You are a tutor.
 
 Instructor Solution (reference):
-{state.instructor_solutions[0]}
+{state.instructor_solutions[state.current_problem_on]}
 
 Student Incorrect Solution:
-{state.student_solutions[0]}
+{state.student_solutions[state.current_problem_on]}
 
 Create ONE practice problem that targets the student's exact mistake.
 
@@ -127,9 +139,10 @@ Return JSON ONLY (no markdown, no backticks) in this exact format:
             "solution": raw,
             "common_pitfall": "Model did not return valid JSON."
         }
-    state.next_question = item.get("question", "")
-    state.next_solution = item.get("solution", "")
-
+    state.next_problem = item.get("question", "")
+    # make post request to student
+    state.instructor_solutions.append(item.get("solution", ""))
+    state.current_problem_on += 1
     return state
 
 def generate_explanation(state: AgentState, llm: OCIAgentLLM) -> AgentState:
@@ -137,6 +150,7 @@ def generate_explanation(state: AgentState, llm: OCIAgentLLM) -> AgentState:
     Generate an explanation for why this is wrong {state.student_solutions[0]}, where this is the solution: {state.instructor_solutions[0]}
     """
     # check if correct
+    # send explanation to user
     return state
 
 
@@ -144,20 +158,20 @@ def build_graph(llm: OCIAgentLLM):
     g = StateGraph(AgentState)
 
     # Nodes
+    g.add_node("start")
     # parse student solution
     g.add_node("parse_student_solutions")
     # generate explanation
     g.add_node("generate_explanation")
     # generate example questions
     g.add_node("generate_example")
-    # check if continue (instructor threshold met)
-    g.add_node("should_continue")
 
     # Edges
-    g.add_edge(START, "parse_student_solutions")
-    g.add_edge("generate_explanation", "generate_example")
+    g.add_edge(START, "start")
+    g.add_edge("start", "parse_student_solutions")
     g.add_conditional_edges("parse_student_solutions", verify_solution, {"incorrect": "generate_explanation", "correct": END})
-    g.add_conditional_edges("generate_example", should_continue, {"CONTINUE": "parse_student_solution", "END": END})
+    g.add_conditional_edges("generate_explanation", check_threshold, {"CONTINUE": "generate_example", "END": END})
+    g.add_edge("generate_example", "parse_student_solution")
     return g.compile()
 
 
