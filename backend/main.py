@@ -1,42 +1,24 @@
 import io
 import json
 import os
+import sys
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from pypdf import PdfReader
 
 load_dotenv()
 
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
 
-SYSTEM_PROMPT = """
-You are an assistant that analyzes a student's math work and returns feedback JSON only.
-Return a JSON object with this exact shape:
-{
-  "problemTitle": "string",
-  "problemPrompt": "string",
-  "personalizedSummary": "string",
-  "score": number,
-  "totalPoints": number,
-  "steps": [
-    {
-      "studentStep": "string",
-      "status": "correct" | "incorrect",
-      "whatWentWrong": "string",
-      "howToFix": "string"
-    }
-  ]
-}
-Rules:
-- If details are unclear from the PDF text, make reasonable assumptions and state that briefly in the summary.
-- Include 3 to 6 steps when possible.
-- Do not include markdown fences.
-- Output valid JSON only.
-""".strip()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+from agent.agent import send_text_to_agent
 
 app = FastAPI(title="Team48 PDF Analyzer")
 
@@ -98,42 +80,62 @@ def _normalize_feedback(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_agent_prompt(pdf_text: str, filename: str) -> str:
+    return f"""
+You are an assistant that analyzes a student's math work and returns JSON only.
+
+Return one JSON object with this exact shape:
+{{
+  "problemTitle": "string",
+  "problemPrompt": "string",
+  "personalizedSummary": "string",
+  "score": number,
+  "totalPoints": number,
+  "steps": [
+    {{
+      "studentStep": "string",
+      "status": "correct" or "incorrect",
+      "whatWentWrong": "string",
+      "howToFix": "string"
+    }}
+  ]
+}}
+
+Rules:
+- Output valid JSON only (no markdown, no backticks).
+- Include 3 to 6 steps when possible.
+- If details are unclear from text extraction, state assumptions briefly in personalizedSummary.
+
+Filename: {filename}
+
+Extracted PDF text:
+{pdf_text[:18000]}
+""".strip()
+
+
 def _analyze_pdf_text(pdf_text: str, filename: str) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured on the backend.")
+    prompt = _build_agent_prompt(pdf_text=pdf_text, filename=filename)
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-    client = OpenAI(api_key=api_key)
+    try:
+        output_text = send_text_to_agent(prompt).strip()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Agent request failed: {exc}") from exc
 
-    user_prompt = (
-        f"Filename: {filename}\n\n"
-        "Analyze the student's math work from this extracted PDF text:\n\n"
-        f"{pdf_text[:18000]}"
-    )
-
-    response = client.responses.create(
-        model=model,
-        input=[
-            {
-                "role": "system",
-                "content": [{"type": "input_text", "text": SYSTEM_PROMPT}],
-            },
-            {
-                "role": "user",
-                "content": [{"type": "input_text", "text": user_prompt}],
-            },
-        ],
-    )
-
-    output_text = response.output_text.strip()
     if not output_text:
-        raise HTTPException(status_code=502, detail="OpenAI returned an empty response.")
+        raise HTTPException(status_code=502, detail="Agent returned an empty response.")
 
     try:
         parsed = json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=502, detail="OpenAI response was not valid JSON.") from exc
+    except json.JSONDecodeError:
+        # If the agent did not obey JSON format, preserve output as summary fallback.
+        parsed = {
+            "problemTitle": "Math Homework Feedback",
+            "problemPrompt": "Could not parse problem prompt from the model output.",
+            "personalizedSummary": output_text[:500],
+            "score": 0,
+            "totalPoints": 10,
+            "steps": [],
+        }
 
     return _normalize_feedback(parsed)
 

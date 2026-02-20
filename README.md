@@ -17,9 +17,10 @@ cp .env.example .env
 Set your API key in `/Users/pawarp/Library/CloudStorage/OneDrive-Umich/team48/backend/.env`:
 
 ```env
-OPENAI_API_KEY=your_real_key
-OPENAI_MODEL=gpt-4.1-mini
+OCI_AGENT_ENDPOINT_ID=ocid1.genaiagentendpoint.oc1.us-chicago-1.example
 ```
+
+Backend reads Oracle credentials from `~/.oci/config` (profile `DEFAULT`) and sends extracted PDF text to your OCI Agent endpoint.
 
 Run backend:
 
@@ -40,4 +41,3 @@ Frontend sends PDF uploads to:
 - `VITE_API_BASE_URL/api/analyze-pdf`
 
 Default base URL is `http://localhost:8000`.
-help
