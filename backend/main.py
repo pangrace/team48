@@ -94,6 +94,69 @@ def _normalize_next_problem(raw: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _pick_feedback_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    # Preferred schema
+    for key in ("comparison_feedback", "comparisonFeedback", "feedback"):
+        value = raw.get(key)
+        if isinstance(value, dict):
+            return value
+
+    # Alternate schema: feedback fields returned at top-level.
+    if any(field in raw for field in ("problemTitle", "problemPrompt", "personalizedSummary", "steps")):
+        return raw
+
+    # Recursive search for any nested dict with feedback-like fields.
+    for value in raw.values():
+        if isinstance(value, dict):
+            nested = _pick_feedback_payload(value)
+            if nested:
+                return nested
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    nested = _pick_feedback_payload(item)
+                    if nested:
+                        return nested
+
+    return {}
+
+
+def _pick_next_problem_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    # Preferred schema
+    for key in ("next_problem", "nextProblem"):
+        value = raw.get(key)
+        if isinstance(value, dict):
+            return value
+
+    # Alternate schema: generated question fields at top-level.
+    if any(field in raw for field in ("question", "solution", "common_pitfall", "commonPitfall")):
+        return {
+            "question": raw.get("question", ""),
+            "solution": raw.get("solution", ""),
+            "common_pitfall": raw.get("common_pitfall", raw.get("commonPitfall", "")),
+        }
+
+    # Alternate schema: a single question string.
+    question_value = raw.get("next_question") or raw.get("generated_question")
+    if isinstance(question_value, str):
+        return {"question": question_value, "solution": "", "common_pitfall": ""}
+
+    # Recursive search for any nested dict with question-like fields.
+    for value in raw.values():
+        if isinstance(value, dict):
+            nested = _pick_next_problem_payload(value)
+            if nested:
+                return nested
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    nested = _pick_next_problem_payload(item)
+                    if nested:
+                        return nested
+
+    return {}
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
@@ -123,8 +186,8 @@ async def initial_feedback(
     except AgentRuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    comparison = agent_response.get("comparison_feedback", {})
-    next_problem = agent_response.get("next_problem", {})
+    comparison = _pick_feedback_payload(agent_response)
+    next_problem = _pick_next_problem_payload(agent_response)
 
     return {
         "feedback": _normalize_feedback(comparison if isinstance(comparison, dict) else {}),
@@ -157,8 +220,8 @@ async def practice_feedback(
     except AgentRuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    feedback = agent_response.get("feedback", {})
-    next_problem = agent_response.get("next_problem", {})
+    feedback = _pick_feedback_payload(agent_response)
+    next_problem = _pick_next_problem_payload(agent_response)
     return {
         "feedback": _normalize_feedback(feedback if isinstance(feedback, dict) else {}),
         "nextProblem": _normalize_next_problem(next_problem if isinstance(next_problem, dict) else {}),

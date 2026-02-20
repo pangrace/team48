@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from typing import Any
 
 import oci
@@ -16,71 +15,123 @@ class AgentRuntimeError(Exception):
     pass
 
 
-@dataclass
-class AgentRuntime:
-    endpoint_id: str
-    client: oci.generative_ai_agent_runtime.GenerativeAiAgentRuntimeClient
-    session_id: str | None = None
-
-    def ensure_session(self) -> str:
-        if self.session_id:
-            return self.session_id
-        session = self.client.create_session(
-            agent_endpoint_id=self.endpoint_id,
-            create_session_details=oci.generative_ai_agent_runtime.models.CreateSessionDetails(
-                display_name="team48-feedback-session"
-            ),
-        ).data
-        self.session_id = session.id
-        return self.session_id
-
-    def chat(self, message: str) -> str:
-        response = self.client.chat(
-            agent_endpoint_id=self.endpoint_id,
-            chat_details=oci.generative_ai_agent_runtime.models.ChatDetails(
-                user_message=message,
-                session_id=self.ensure_session(),
-                should_stream=False,
-            ),
-        ).data
-        for attr in ("message", "text", "content"):
-            value = getattr(response, attr, None)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return str(response).strip()
+def _log_agent_response(tag: str, payload: str) -> None:
+    if os.getenv("DEBUG_AGENT_RESPONSE", "").lower() not in {"1", "true", "yes", "on"}:
+        return
+    max_chars = int(os.getenv("DEBUG_AGENT_RESPONSE_MAX_CHARS", "4000"))
+    trimmed = payload[:max_chars]
+    print(f"[agent-debug:{tag}] {trimmed}")
 
 
-def _build_runtime() -> AgentRuntime:
-    endpoint_id = os.getenv("OCI_AGENT_ENDPOINT_ID")
-    if not endpoint_id:
-        raise AgentConfigError("OCI_AGENT_ENDPOINT_ID is not configured.")
-
+def _build_inference_client() -> tuple[oci.generative_ai_inference.GenerativeAiInferenceClient, str, str]:
+    model_id = os.getenv("OCI_MODEL_ID")
+    if not model_id:
+        raise AgentConfigError("OCI_MODEL_ID is not configured.")
+    compartment_id = os.getenv("OCI_COMPARTMENT_ID")
+    if not compartment_id:
+        raise AgentConfigError("OCI_COMPARTMENT_ID is not configured.")
     config_file = os.getenv("OCI_CONFIG_FILE")
     config_profile = os.getenv("OCI_CONFIG_PROFILE", "DEFAULT")
     try:
         config = oci.config.from_file(file_location=config_file, profile_name=config_profile)
     except Exception as exc:
-        raise AgentConfigError("Unable to load OCI config for the agent runtime.") from exc
+        raise AgentConfigError("Unable to load OCI config for the inference runtime.") from exc
 
-    return AgentRuntime(
-        endpoint_id=endpoint_id,
-        client=oci.generative_ai_agent_runtime.GenerativeAiAgentRuntimeClient(config),
+    region = os.getenv("OCI_INFERENCE_REGION") or config.get("region")
+    if region:
+        config["region"] = region
+    explicit_endpoint = os.getenv("OCI_INFERENCE_ENDPOINT")
+    client_kwargs: dict[str, Any] = {}
+    if explicit_endpoint:
+        client_kwargs["service_endpoint"] = explicit_endpoint
+    client = oci.generative_ai_inference.GenerativeAiInferenceClient(config, **client_kwargs)
+    return client, model_id, compartment_id
+
+
+def _extract_response_text_from_inference(result: Any) -> str:
+    chat_response = getattr(result, "chat_response", None)
+    if chat_response is None:
+        return str(result)
+
+    # Cohere format commonly returns .text
+    text = getattr(chat_response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    # Generic format returns choices[].message.content[].text
+    choices = getattr(chat_response, "choices", None)
+    if isinstance(choices, list):
+        chunks: list[str] = []
+        for choice in choices:
+            message = getattr(choice, "message", None)
+            content = getattr(message, "content", None) if message is not None else None
+            if isinstance(content, list):
+                for item in content:
+                    item_text = getattr(item, "text", None)
+                    if isinstance(item_text, str) and item_text.strip():
+                        chunks.append(item_text.strip())
+        if chunks:
+            return "\n".join(chunks)
+
+    return str(chat_response)
+
+
+def _chat_inference(prompt: str) -> str:
+    client, model_id, compartment_id = _build_inference_client()
+    request = oci.generative_ai_inference.models.CohereChatRequest(
+        message=prompt,
+        max_tokens=1200,
+        temperature=0.2,
+        top_p=0.75,
+        top_k=0,
+        is_stream=False,
     )
+    details = oci.generative_ai_inference.models.ChatDetails(
+        compartment_id=compartment_id,
+        serving_mode=oci.generative_ai_inference.models.OnDemandServingMode(model_id=model_id),
+        chat_request=request,
+    )
+    response = client.chat(details)
+    return _extract_response_text_from_inference(response.data)
 
 
 def _extract_json(text: str) -> dict[str, Any]:
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise AgentRuntimeError("Agent response did not contain JSON.")
+    stripped = text.strip()
+    # 1) Direct JSON payload
     try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError as exc:
-        raise AgentRuntimeError("Agent returned invalid JSON.") from exc
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    # 2) Fenced or mixed text payload
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            parsed = json.loads(stripped[start : end + 1])
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # 3) If the model returned a JSON string inside a wrapper
+    for quote_wrapped in (stripped.strip('"'), stripped.strip("'")):
+        if "{" in quote_wrapped and "}" in quote_wrapped:
+            s = quote_wrapped.find("{")
+            e = quote_wrapped.rfind("}")
+            try:
+                parsed = json.loads(quote_wrapped[s : e + 1])
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                continue
+
+    raise AgentRuntimeError("Agent response did not contain parseable JSON.")
 
 
 def generate_initial_feedback(student_text: str, instructor_text: str) -> dict[str, Any]:
-    runtime = _build_runtime()
     prompt = f"""
 Compare a student's solution against an instructor solution.
 The student solution may be step-by-step OR a final/concise answer only.
@@ -121,9 +172,13 @@ Instructor solution text:
 {instructor_text[:18000]}
 """.strip()
     try:
-        return _extract_json(runtime.chat(prompt))
+        raw = _chat_inference(prompt)
+        _log_agent_response("initial", raw)
+        return _extract_json(raw)
+    except AgentRuntimeError:
+        raise
     except Exception as exc:
-        raise AgentRuntimeError("Failed generating initial comparison feedback.") from exc
+        raise AgentRuntimeError(f"Failed generating initial comparison feedback: {exc}") from exc
 
 
 def generate_practice_feedback(
@@ -132,7 +187,6 @@ def generate_practice_feedback(
     solution: str,
     common_pitfall: str,
 ) -> dict[str, Any]:
-    runtime = _build_runtime()
     prompt = f"""
 Evaluate a student's attempt at a practice problem.
 The attempt may be step-by-step OR a concise final answer.
@@ -179,6 +233,10 @@ Student attempt text:
 {student_attempt_text[:18000]}
 """.strip()
     try:
-        return _extract_json(runtime.chat(prompt))
+        raw = _chat_inference(prompt)
+        _log_agent_response("practice", raw)
+        return _extract_json(raw)
+    except AgentRuntimeError:
+        raise
     except Exception as exc:
-        raise AgentRuntimeError("Failed generating practice feedback.") from exc
+        raise AgentRuntimeError(f"Failed generating practice feedback: {exc}") from exc

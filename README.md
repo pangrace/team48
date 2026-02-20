@@ -3,28 +3,28 @@
 Student feedback loop with:
 - React frontend (`/app`)
 - Python FastAPI backend (`/backend`)
-- OCI Agent runtime integration (`/agent`)
+- OCI integration (`/agent`)
 
 ## 1. Backend setup (Python)
 
 ```bash
-cd /Users/gracepang/Documents/ai-hackathon/team48/backend
+cd /Users/pawarp/Library/CloudStorage/OneDrive-Umich/team48/backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Set OCI values in `/Users/gracepang/Documents/ai-hackathon/team48/backend/.env`:
+Set OCI values in `/Users/pawarp/Library/CloudStorage/OneDrive-Umich/team48/backend/.env`:
 
 ```env
-OCI_AGENT_ENDPOINT_ID=ocid1.genaiagentendpoint.oc1..<your_endpoint_id>
+OCI_MODEL_ID=ocid1.generativeaimodel.oc1.us-chicago-1.example
+OCI_COMPARTMENT_ID=ocid1.compartment.oc1..example
 OCI_CONFIG_FILE=~/.oci/config
 OCI_CONFIG_PROFILE=DEFAULT
-OCI_AGENT_ENDPOINT_ID=ocid1.genaiagentendpoint.oc1.us-chicago-1.example
 ```
 
-Backend reads Oracle credentials from `~/.oci/config` (profile `DEFAULT`) and sends extracted PDF text to your OCI Agent endpoint.
+Backend reads Oracle credentials from `~/.oci/config` and calls OCI Generative AI Inference with your model OCID.
 
 Run backend:
 
@@ -35,7 +35,7 @@ uvicorn main:app --reload --port 8000
 ## 2. Frontend setup (React/Vite)
 
 ```bash
-cd /Users/gracepang/Documents/ai-hackathon/team48/app
+cd /Users/pawarp/Library/CloudStorage/OneDrive-Umich/team48/app
 npm install
 cp .env.example .env
 npm run dev
