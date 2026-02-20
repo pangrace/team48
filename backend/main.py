@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from agent.agent import AgentConfigError, AgentRuntimeError, analyze_math_pdf_text_with_agent
+from team48.agent.pdf_extract_agent import AgentConfigError, AgentRuntimeError, analyze_math_pdf_text_with_agent
 
 load_dotenv()
 
