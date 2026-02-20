@@ -181,11 +181,13 @@ function App() {
   const { theme } = useTheme()
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<MathFeedback | null>(null)
   const [feedbackSeedIndex, setFeedbackSeedIndex] = useState(0)
   const [hasConfirmedFeedback, setHasConfirmedFeedback] = useState(false)
   const [practiceOffset, setPracticeOffset] = useState(1)
   const [practiceProblem, setPracticeProblem] = useState<PracticeProblem | null>(null)
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '')
 
   const fileSizeLabel = useMemo(() => {
     if (!selectedFile) {
@@ -216,21 +218,48 @@ function App() {
     setPracticeProblem(null)
   }
 
-  const processUploadedFile = (file: File) => {
+  const processUploadedFile = async (file: File) => {
     setSelectedFile(file)
     resetFeedbackFlow()
     setIsGenerating(true)
+    setUploadError(null)
 
-    window.setTimeout(() => {
-      const result = getMockMathFeedback(file.name)
-      setFeedback(result.feedback)
-      setFeedbackSeedIndex(result.seedIndex)
+    const formData = new FormData()
+    formData.append('pdf', file)
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/analyze-pdf`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        const errorDetail =
+          body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string'
+            ? body.detail
+            : 'Failed to analyze PDF.'
+        throw new Error(errorDetail)
+      }
+
+      if (!body || typeof body !== 'object' || !('feedback' in body)) {
+        throw new Error('Backend response was missing feedback data.')
+      }
+
+      const fallbackSeed = getMockMathFeedback(file.name)
+      setFeedback(body.feedback as MathFeedback)
+      setFeedbackSeedIndex(fallbackSeed.seedIndex)
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Unexpected error while analyzing PDF.')
+      setFeedback(null)
+    } finally {
       setIsGenerating(false)
-    }, 1000)
+    }
   }
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
+    const input = event.target
 
     if (!file) {
       return
@@ -238,12 +267,12 @@ function App() {
 
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       alert('Please upload a PDF file.')
-      event.target.value = ''
+      input.value = ''
       return
     }
 
-    processUploadedFile(file)
-    event.target.value = ''
+    await processUploadedFile(file)
+    input.value = ''
   }
 
   const handleConfirmRead = () => {
@@ -304,9 +333,9 @@ function App() {
           </label>
         </header>
 
-        {isGenerating || !feedback ? (
+        {isGenerating ? (
           <p className="loading-text">Analyzing your solution steps...</p>
-        ) : (
+        ) : feedback ? (
           <div className="feedback-content">
             <div className="score-banner">
               <p>
@@ -362,6 +391,10 @@ function App() {
               </div>
             ) : null}
           </div>
+        ) : uploadError ? (
+          <p className="loading-text">{uploadError}</p>
+        ) : (
+          <p className="loading-text">Upload a PDF to generate feedback.</p>
         )}
       </section>
     </main>
