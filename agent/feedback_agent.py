@@ -152,11 +152,6 @@ Return JSON only with this exact shape:
         "howToFix": "string"
       }}
     ]
-  }},
-  "next_problem": {{
-    "question": "string",
-    "solution": "string",
-    "common_pitfall": "string"
   }}
 }}
 
@@ -179,6 +174,43 @@ Instructor solution text:
         raise
     except Exception as exc:
         raise AgentRuntimeError(f"Failed generating initial comparison feedback: {exc}") from exc
+
+
+def generate_next_problem(student_text: str, instructor_text: str, comparison_summary: str = "") -> dict[str, Any]:
+    prompt = f"""
+Generate one next practice problem based on where the student went wrong compared to the instructor solution.
+
+Return JSON only with this exact shape:
+{{
+  "next_problem": {{
+    "question": "string",
+    "solution": "string",
+    "common_pitfall": "string"
+  }}
+}}
+
+Rules:
+- Keep difficulty similar to the original problem.
+- Focus on the student's most likely misconception.
+- Return valid JSON only.
+
+Optional comparison summary:
+{comparison_summary[:2000]}
+
+Student solution text:
+{student_text[:18000]}
+
+Instructor solution text:
+{instructor_text[:18000]}
+""".strip()
+    try:
+        raw = _chat_inference(prompt)
+        _log_agent_response("next_problem", raw)
+        return _extract_json(raw)
+    except AgentRuntimeError:
+        raise
+    except Exception as exc:
+        raise AgentRuntimeError(f"Failed generating next problem: {exc}") from exc
 
 
 def generate_practice_feedback(

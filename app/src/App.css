@@ -135,6 +135,36 @@
   border: 1px solid var(--line);
 }
 
+.spinner-wrap {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffaf3;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 3px solid var(--line);
+  border-top-color: var(--theme-text);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+.professor-notice {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  border-radius: 12px;
+  border: 1px solid #a67621;
+  background: #fff4d7;
+  color: #6c4b00;
+  font-weight: 700;
+}
+
 .error-text {
   margin: 0;
   padding: 1rem;
@@ -232,11 +262,14 @@
 .step-head p,
 .step-card p {
   margin: 0;
+  font-weight: 500;
+
 }
 
 .step-work {
   margin: 0.55rem 0;
   font-family: 'Courier New', Courier, monospace;
+  color: var(--theme-text);
 }
 
 .step-card p + p {
@@ -300,5 +333,14 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }

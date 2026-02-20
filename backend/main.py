@@ -4,7 +4,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover
+    def load_dotenv() -> None:
+        return None
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,7 +16,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from agent.feedback_agent import AgentConfigError, AgentRuntimeError, generate_initial_feedback, generate_practice_feedback
+from agent.feedback_agent import (
+    AgentConfigError,
+    AgentRuntimeError,
+    generate_initial_feedback,
+    generate_next_problem,
+    generate_practice_feedback,
+)
 from agent.pdf_extract_agent import PdfExtractionError, extract_text_from_pdf_bytes
 
 load_dotenv()
@@ -187,10 +197,40 @@ async def initial_feedback(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     comparison = _pick_feedback_payload(agent_response)
-    next_problem = _pick_next_problem_payload(agent_response)
 
     return {
         "feedback": _normalize_feedback(comparison if isinstance(comparison, dict) else {}),
+    }
+
+
+@app.post("/api/initial-next-problem")
+async def initial_next_problem(
+    student_pdf: UploadFile = File(...),
+    instructor_pdf: UploadFile = File(...),
+    comparison_summary: str = Form(""),
+) -> dict[str, Any]:
+    student_bytes = await _read_pdf(student_pdf)
+    instructor_bytes = await _read_pdf(instructor_pdf)
+
+    try:
+        student_text = extract_text_from_pdf_bytes(student_bytes)
+        instructor_text = extract_text_from_pdf_bytes(instructor_bytes)
+    except PdfExtractionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        agent_response = generate_next_problem(
+            student_text=student_text,
+            instructor_text=instructor_text,
+            comparison_summary=comparison_summary,
+        )
+    except AgentConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except AgentRuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    next_problem = _pick_next_problem_payload(agent_response)
+    return {
         "nextProblem": _normalize_next_problem(next_problem if isinstance(next_problem, dict) else {}),
     }
 
