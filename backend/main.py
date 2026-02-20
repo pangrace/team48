@@ -1,6 +1,4 @@
 import io
-import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,12 +17,6 @@ from agent.agent import AgentConfigError, AgentRuntimeError, analyze_math_pdf_te
 load_dotenv()
 
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-
-from agent.agent import send_text_to_agent
 
 app = FastAPI(title="Team48 PDF Analyzer")
 
@@ -86,62 +78,15 @@ def _normalize_feedback(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_agent_prompt(pdf_text: str, filename: str) -> str:
-    return f"""
-You are an assistant that analyzes a student's math work and returns JSON only.
-
-Return one JSON object with this exact shape:
-{{
-  "problemTitle": "string",
-  "problemPrompt": "string",
-  "personalizedSummary": "string",
-  "score": number,
-  "totalPoints": number,
-  "steps": [
-    {{
-      "studentStep": "string",
-      "status": "correct" or "incorrect",
-      "whatWentWrong": "string",
-      "howToFix": "string"
-    }}
-  ]
-}}
-
-Rules:
-- Output valid JSON only (no markdown, no backticks).
-- Include 3 to 6 steps when possible.
-- If details are unclear from text extraction, state assumptions briefly in personalizedSummary.
-
-Filename: {filename}
-
-Extracted PDF text:
-{pdf_text[:18000]}
-""".strip()
-
-
 def _analyze_pdf_text(pdf_text: str, filename: str) -> dict[str, Any]:
-    prompt = _build_agent_prompt(pdf_text=pdf_text, filename=filename)
-
     try:
-        output_text = send_text_to_agent(prompt).strip()
+        raw_feedback = analyze_math_pdf_text_with_agent(pdf_text=pdf_text, filename=filename)
+    except AgentConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except AgentRuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Agent request failed: {exc}") from exc
-
-    if not output_text:
-        raise HTTPException(status_code=502, detail="Agent returned an empty response.")
-
-    try:
-        parsed = json.loads(output_text)
-    except json.JSONDecodeError:
-        # If the agent did not obey JSON format, preserve output as summary fallback.
-        parsed = {
-            "problemTitle": "Math Homework Feedback",
-            "problemPrompt": "Could not parse problem prompt from the model output.",
-            "personalizedSummary": output_text[:500],
-            "score": 0,
-            "totalPoints": 10,
-            "steps": [],
-        }
 
     return _normalize_feedback(raw_feedback)
 
