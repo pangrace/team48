@@ -10,6 +10,12 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+from agent.agent import AgentConfigError, AgentRuntimeError, analyze_math_pdf_text_with_agent
+
 load_dotenv()
 
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
@@ -137,7 +143,7 @@ def _analyze_pdf_text(pdf_text: str, filename: str) -> dict[str, Any]:
             "steps": [],
         }
 
-    return _normalize_feedback(parsed)
+    return _normalize_feedback(raw_feedback)
 
 
 @app.get("/health")

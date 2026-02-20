@@ -135,6 +135,16 @@
   border: 1px solid var(--line);
 }
 
+.error-text {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--warn);
+  background: #ffefe5;
+  color: var(--warn);
+  font-weight: 700;
+}
+
 .primary-button,
 .secondary-button {
   width: 100%;

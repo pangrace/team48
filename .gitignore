@@ -1,2 +1,6 @@
 *.pem
+/backend/venv
+/backend/.env
+/backend/__pycache__
+/backend/requirements.txt
 .venv
